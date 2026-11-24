@@ -8,7 +8,6 @@ import streamlit as st
 
 # ---------------------------------------------------------
 # BOOKLOG - 개인 독서 기록 서비스 (최종 완성본)
-# Streamlit Community Cloud용 단일 파일 앱
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="BOOKLOG | 나의 독서 기록",
@@ -105,13 +104,11 @@ def book_label(row):
 
 init_db()
 
-# Session state 초기화
 if "page" not in st.session_state:
     st.session_state.page = "홈"
 if "editing_book_id" not in st.session_state:
     st.session_state.editing_book_id = None
 
-# 커스텀 스타일링
 st.markdown(
     """
     <style>
@@ -126,7 +123,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 사이드바 내비게이션
 with st.sidebar:
     st.markdown("# 📚 BOOKLOG")
     st.caption("읽고, 기록하고, 돌아보다.")
@@ -148,7 +144,9 @@ books = get_books()
 book_count = len(books)
 completed_count = int((books["status"] == "완독").sum()) if not books.empty else 0
 reading_count = int((books["status"] == "읽는 중").sum()) if not books.empty else 0
-total_pages_read = int(query_df("SELECT COALESCE(SUM(pages_read),0) AS n FROM reading_logs").iloc[0]["n"])
+total_pages_read = int(
+    query_df("SELECT COALESCE(SUM(pages_read),0) AS n FROM reading_logs").iloc[0]["n"]
+)
 today_str = date.today().isoformat()
 
 
@@ -165,16 +163,19 @@ if st.session_state.page == "홈":
     c3.metric("읽는 중", f"{reading_count}권")
     c4.metric("누적 독서 페이지", f"{total_pages_read:,}쪽")
 
-    # 오늘의 일간 목표 요약 배너
     daily_row = query_df("SELECT target_pages FROM daily_goals WHERE id = 1")
     current_daily_goal = int(daily_row.iloc[0]["target_pages"]) if not daily_row.empty else 30
     read_today_pages = int(
-        query_df("SELECT COALESCE(SUM(pages_read), 0) AS n FROM reading_logs WHERE read_date = ?", (today_str,)).iloc[0]["n"]
+        query_df(
+            "SELECT COALESCE(SUM(pages_read), 0) AS n FROM reading_logs WHERE read_date = ?",
+            (today_str,),
+        ).iloc[0]["n"]
     )
+    pct_today = int(min(read_today_pages / max(current_daily_goal, 1) * 100, 100))
     st.write("")
     st.progress(
         min(read_today_pages / max(current_daily_goal, 1), 1.0),
-        text=f"📅 오늘의 독서 달성률: {read_today_pages:,} / {current_daily_goal:,}쪽 ({int(min(read_today_pages / max(current_daily_goal, 1) * 100, 100))}%)",
+        text=f"📅 오늘의 독서 달성률: {read_today_pages:,} / {current_daily_goal:,}쪽 ({pct_today}%)",
     )
 
     st.subheader("📖 지금 읽고 있는 책")
@@ -229,10 +230,11 @@ elif st.session_state.page == "나의 책장":
             title = a.text_input("책 제목 *")
             author = b.text_input("저자")
             publisher = a.text_input("출판사")
-            genre = b.selectbox(
-                "장르",
-                ["선택 안 함", "소설", "에세이", "인문", "사회", "경제·경영", "자기계발", "과학", "역사", "예술", "기타"],
-            )
+            genres_list = [
+                "선택 안 함", "소설", "에세이", "인문", "사회",
+                "경제·경영", "자기계발", "과학", "역사", "예술", "기타"
+            ]
+            genre = b.selectbox("장르", genres_list)
             total_pages = a.number_input("총 페이지 수", min_value=0, max_value=100000, value=0, step=1)
             status = b.selectbox("독서 상태", ["읽을 예정", "읽는 중", "완독", "중단"])
             submitted = st.form_submit_button("책 등록", type="primary")
@@ -283,91 +285,4 @@ elif st.session_state.page == "나의 책장":
                     done = get_progress(b["id"])
                     total = int(b["total_pages"] or 0)
                     if total > 0:
-                        st.progress(min(done / total, 1.0), text=f"읽은 페이지 {min(done, total):,} / {total:,}쪽")
-                    else:
-                        st.caption(f"읽은 페이지 {done:,}쪽")
-                with middle:
-                    new_status = st.selectbox(
-                        "독서 상태",
-                        ["읽을 예정", "읽는 중", "완독", "중단"],
-                        index=["읽을 예정", "읽는 중", "완독", "중단"].index(b["status"]),
-                        key=f"status_{b['id']}",
-                    )
-                    if new_status != b["status"]:
-                        execute("UPDATE books SET status = ? WHERE id = ?", (new_status, int(b["id"])))
-                        st.rerun()
-                with right:
-                    if st.button("수정", key=f"edit_{b['id']}"):
-                        st.session_state.editing_book_id = int(b["id"])
-                        st.rerun()
-                    if st.button("삭제", key=f"delete_{b['id']}"):
-                        st.session_state[f"confirm_delete_{b['id']}"] = True
-                if st.session_state.get(f"confirm_delete_{b['id']}", False):
-                    st.warning("이 책과 연결된 독서 기록 및 노트도 함께 삭제됩니다.")
-                    yes, no = st.columns(2)
-                    if yes.button("정말 삭제", key=f"yes_delete_{b['id']}", type="primary"):
-                        execute("DELETE FROM books WHERE id = ?", (int(b["id"]),))
-                        st.session_state[f"confirm_delete_{b['id']}"] = False
-                        st.success("삭제했습니다.")
-                        st.rerun()
-                    if no.button("취소", key=f"no_delete_{b['id']}"):
-                        st.session_state[f"confirm_delete_{b['id']}"] = False
-                        st.rerun()
-
-        edit_id = st.session_state.editing_book_id
-        if edit_id is not None:
-            selected = books[books["id"] == edit_id]
-            if not selected.empty:
-                b = selected.iloc[0]
-                st.divider()
-                st.subheader("책 정보 수정")
-                with st.form("edit_book_form"):
-                    new_title = st.text_input("책 제목", value=b["title"])
-                    new_author = st.text_input("저자", value=b["author"] or "")
-                    new_publisher = st.text_input("출판사", value=b["publisher"] or "")
-                    genres = ["", "소설", "에세이", "인문", "사회", "경제·경영", "자기계발", "과학", "역사", "예술", "기타"]
-                    old_genre = b["genre"] or ""
-                    new_genre = st.selectbox("장르", genres, index=genres.index(old_genre) if old_genre in genres else 0)
-                    new_total = st.number_input("총 페이지 수", min_value=0, value=int(b["total_pages"] or 0), step=1)
-                    save, cancel = st.columns(2)
-                    save_edit = save.form_submit_button("변경 사항 저장", type="primary")
-                    cancel_edit = cancel.form_submit_button("수정 취소")
-                    if save_edit:
-                        if not new_title.strip():
-                            st.error("책 제목은 비워 둘 수 없습니다.")
-                        else:
-                            execute(
-                                "UPDATE books SET title=?, author=?, publisher=?, genre=?, total_pages=? WHERE id=?",
-                                (
-                                    new_title.strip(),
-                                    new_author.strip(),
-                                    new_publisher.strip(),
-                                    new_genre,
-                                    int(new_total),
-                                    edit_id,
-                                ),
-                            )
-                            st.session_state.editing_book_id = None
-                            st.success("수정했습니다.")
-                            st.rerun()
-                    if cancel_edit:
-                        st.session_state.editing_book_id = None
-                        st.rerun()
-
-
-# ---------------------------------------------------------
-# 3. READING LOGS (독서 기록)
-# ---------------------------------------------------------
-elif st.session_state.page == "독서 기록":
-    st.title("📝 독서 기록")
-    st.write("책을 읽은 날짜와 페이지, 읽으면서 떠오른 생각을 기록하세요.")
-    books = get_books()
-    if books.empty:
-        st.info("먼저 나의 책장에서 책을 등록해 주세요.")
-    else:
-        options = {book_label(row): int(row["id"]) for _, row in books.iterrows()}
-        with st.form("reading_log_form", clear_on_submit=True):
-            selected_label = st.selectbox("책 선택", list(options.keys()))
-            read_date = st.date_input("읽은 날짜", value=date.today())
-            a, b = st.columns(2)
-            pages_read = a.number_input("이번에 읽은 페이지 수", min_value=1, max_value=
+                        st.progress(min(done / total, 1.0), text=f"읽은 페이지 {min(done
